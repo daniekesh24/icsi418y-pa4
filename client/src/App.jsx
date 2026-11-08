@@ -10,6 +10,15 @@ function App() {
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
   const [members, setMembers] = useState([]);
+  const [stories, setStories] = useState([]);
+  const [editingStoryId, setEditingStoryId] = useState("");
+  const [storyForm, setStoryForm] = useState({
+    title: "",
+    description: "",
+    priority: "Medium",
+    status: "To Do",
+    assigned_user_id: "",
+  });
   const [selectedProject, setSelectedProject] = useState("");
   const [selectedUser, setSelectedUser] = useState("");
   const [message, setMessage] = useState("");
@@ -84,6 +93,16 @@ function App() {
     setMembers(data);
   }
 
+  async function loadStories(projectId) {
+    if (!projectId) {
+      setStories([]);
+      return;
+    }
+
+    const data = await request(`/projects/${projectId}/stories`);
+    setStories(data);
+  }
+
   async function refreshData() {
     setError("");
     try {
@@ -100,10 +119,23 @@ function App() {
   }, [user]);
 
   useEffect(() => {
+    setEditingStoryId("");
+    setStoryForm({
+      title: "",
+      description: "",
+      priority: "Medium",
+      status: "To Do",
+      assigned_user_id: "",
+    });
+
     if (selectedProject) {
-      loadMembers(selectedProject).catch((err) => setError(err.message));
+      Promise.all([
+        loadMembers(selectedProject),
+        loadStories(selectedProject),
+      ]).catch((err) => setError(err.message));
     } else {
       setMembers([]);
+      setStories([]);
     }
   }, [selectedProject]);
 
@@ -248,11 +280,92 @@ function App() {
     }
   }
 
+  function resetStoryForm() {
+    setEditingStoryId("");
+    setStoryForm({
+      title: "",
+      description: "",
+      priority: "Medium",
+      status: "To Do",
+      assigned_user_id: "",
+    });
+  }
+
+  function startEditingStory(story) {
+    setEditingStoryId(story._id);
+    setStoryForm({
+      title: story.title,
+      description: story.description,
+      priority: story.priority,
+      status: story.status,
+      assigned_user_id: story.assigned_user_id || "",
+    });
+  }
+
+  async function handleStorySubmit(e) {
+    e.preventDefault();
+    setMessage("");
+    setError("");
+
+    if (!selectedProject) {
+      setError("Select a project first.");
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const path = editingStoryId
+        ? `/projects/${selectedProject}/stories/${editingStoryId}`
+        : `/projects/${selectedProject}/stories`;
+
+      const data = await request(path, {
+        method: editingStoryId ? "PUT" : "POST",
+        body: JSON.stringify(storyForm),
+      });
+
+      setMessage(data.message);
+      resetStoryForm();
+      await loadStories(selectedProject);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDeleteStory(storyId) {
+    if (!window.confirm("Are you sure you want to delete this user story?")) {
+      return;
+    }
+
+    setMessage("");
+    setError("");
+    setLoading(true);
+
+    try {
+      const data = await request(
+        `/projects/${selectedProject}/stories/${storyId}`,
+        { method: "DELETE" }
+      );
+
+      setMessage(data.message);
+      if (editingStoryId === storyId) resetStoryForm();
+      await loadStories(selectedProject);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function logout() {
     setUser(null);
     setProjects([]);
     setMembers([]);
+    setStories([]);
     setUsers([]);
+    resetStoryForm();
     setSelectedProject("");
     setMessage("");
     setError("");
@@ -560,6 +673,151 @@ function App() {
                 Add Member
               </button>
             </form>
+          </>
+        )}
+      </section>
+
+      <section className="panel">
+        <h2>User Stories Backlog</h2>
+
+        {!selectedProject ? (
+          <p>Select a project in Project Membership to view its backlog.</p>
+        ) : (
+          <>
+            <form className="add-member-form" onSubmit={handleStorySubmit}>
+              <h3>{editingStoryId ? "Edit User Story" : "Create User Story"}</h3>
+
+              <label>
+                Story Title
+                <input
+                  type="text"
+                  required
+                  value={storyForm.title}
+                  onChange={(e) =>
+                    setStoryForm({ ...storyForm, title: e.target.value })
+                  }
+                  placeholder="Enter a short story title"
+                />
+              </label>
+
+              <label>
+                Description
+                <textarea
+                  required
+                  value={storyForm.description}
+                  onChange={(e) =>
+                    setStoryForm({ ...storyForm, description: e.target.value })
+                  }
+                  placeholder="As a [type of user], I want [goal], so that [benefit]."
+                  rows="3"
+                />
+              </label>
+
+              <label>
+                Priority
+                <select
+                  value={storyForm.priority}
+                  onChange={(e) =>
+                    setStoryForm({ ...storyForm, priority: e.target.value })
+                  }
+                >
+                  <option value="High">High</option>
+                  <option value="Medium">Medium</option>
+                  <option value="Low">Low</option>
+                </select>
+              </label>
+
+              {editingStoryId && (
+                <label>
+                  Status
+                  <select
+                    value={storyForm.status}
+                    onChange={(e) =>
+                      setStoryForm({ ...storyForm, status: e.target.value })
+                    }
+                  >
+                    <option value="To Do">To Do</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Done">Done</option>
+                  </select>
+                </label>
+              )}
+
+              <label>
+                Assign To
+                <select
+                  value={storyForm.assigned_user_id}
+                  onChange={(e) =>
+                    setStoryForm({
+                      ...storyForm,
+                      assigned_user_id: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">Unassigned</option>
+                  {members.map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {member.f_name} {member.l_name} (@{member.username})
+                      {member.is_project_lead ? " — Project Lead" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button disabled={loading} type="submit">
+                {editingStoryId ? "Save Changes" : "Create User Story"}
+              </button>
+
+              {editingStoryId && (
+                <button type="button" onClick={resetStoryForm}>
+                  Cancel Edit
+                </button>
+              )}
+            </form>
+
+            <h3>Project Backlog</h3>
+
+            {stories.length === 0 ? (
+              <p>No user stories yet. Create your first story above.</p>
+            ) : (
+              <div className="project-grid">
+                {stories.map((story) => (
+                  <article className="project-card" key={story._id}>
+                    <h3>{story.title}</h3>
+
+                    <p><strong>Priority:</strong> {story.priority}</p>
+                    <p><strong>Status:</strong> {story.status}</p>
+                    <p>
+                      <strong>Assigned to:</strong>{" "}
+                      {story.assigned_user
+                        ? `${story.assigned_user.f_name} ${story.assigned_user.l_name} (@${story.assigned_user.username})`
+                        : "Unassigned"}
+                    </p>
+
+                    <details>
+                      <summary>View Description</summary>
+                      <p>{story.description}</p>
+                    </details>
+
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => startEditingStory(story)}
+                    >
+                      Edit Story
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => handleDeleteStory(story._id)}
+                    >
+                      Delete Story
+                    </button>
+                  </article>
+                ))}
+              </div>
+            )}
           </>
         )}
       </section>
